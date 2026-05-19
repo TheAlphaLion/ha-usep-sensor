@@ -1,1 +1,201 @@
+##############################################################################
+# USEP Example Dashboard
+#
+# Requires: apexcharts-card (HACS → Frontend → ApexCharts Card)
+# All other cards are built-in to Home Assistant.
+#
+# HOW TO USE:
+#   1. Create a new dashboard in HA (Settings → Dashboards → Add Dashboard)
+#   2. Open it → Edit (pencil) → ⋮ → Raw configuration editor
+#   3. Delete everything and paste this file
+#   4. Save
+#
+# Entity IDs: HA generates these from the device name.
+# If your entities have a different prefix, check Developer Tools → States
+# and search "usep" to find yours.
+##############################################################################
 
+title: USEP
+views:
+  - title: USEP
+    icon: mdi:lightning-bolt
+    panel: true
+    cards:
+      - type: vertical-stack
+        cards:
+
+          ## ── Current prices + status ──────────────────────────────────────
+          - type: entities
+            title: Current Prices
+            entities:
+              - entity: sensor.usep_singapore_electricity_price_usep_current
+                name: USEP now
+                secondary_info: last-changed
+              - entity: sensor.usep_singapore_electricity_price_usep_next_period
+                name: Next period
+              - entity: sensor.usep_singapore_electricity_price_usep_peak_today
+                name: Peak today
+              - entity: sensor.usep_singapore_electricity_price_usep_lowest_forecast
+                name: Cheapest ahead
+                secondary_info: attribute
+                attribute: lowest_forecast_period
+              - entity: sensor.usep_singapore_electricity_price_grid_demand
+                name: Grid demand
+              - entity: sensor.usep_singapore_electricity_price_solar_generation
+                name: Solar
+              - entity: sensor.usep_singapore_electricity_price_usep_current_period
+                name: Period
+              - entity: sensor.usep_singapore_electricity_price_usep_data_status
+                name: Data status
+
+          ## ── Pending data banner ──────────────────────────────────────────
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.usep_singapore_electricity_price_usep_data_status
+                state: forecast_pending
+            card:
+              type: markdown
+              content: >
+                ⏳ **Using forecast price** — confirmed EMC data arrives in ~2 min.
+
+          ## ── Full-day bar chart ───────────────────────────────────────────
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: "USEP — All 48 Periods Today ($/MWh)"
+              show_states: false
+            graph_span: 24h
+            span:
+              start: day
+            now:
+              show: true
+              label: Now
+              color: "#888888"
+            apex_config:
+              chart:
+                type: bar
+                height: 280
+              plotOptions:
+                bar:
+                  columnWidth: "90%"
+                  borderRadius: 1
+              xaxis:
+                type: datetime
+                labels:
+                  format: "HH:mm"
+                  datetimeUTC: false
+              tooltip:
+                x:
+                  format: "HH:mm"
+                y:
+                  formatter: "function(v){ return v ? '$'+v.toFixed(2)+'/MWh' : ''; }"
+              legend:
+                show: true
+                position: top
+              yaxis:
+                - seriesName: "Normal"
+                  labels:
+                    formatter: "function(v){ return '$'+v.toFixed(0); }"
+                  title:
+                    text: "$/MWh"
+                - seriesName: "Demand MW"
+                  opposite: true
+                  labels:
+                    formatter: "function(v){ return v.toFixed(0); }"
+                  title:
+                    text: "MW"
+            series:
+              - entity: sensor.usep_singapore_electricity_price_usep_forecast_data
+                name: "Normal"
+                type: column
+                color: "#27ae60"
+                data_generator: |
+                  const raw = entity.attributes.chart_data_usep;
+                  if (!raw || !raw.length) return [];
+                  return raw.filter(d => (parseFloat(d.y)||0) < 200)
+                            .map(d => [new Date(d.x).getTime(), parseFloat(d.y)||0]);
+              - entity: sensor.usep_singapore_electricity_price_usep_forecast_data
+                name: "Elevated"
+                type: column
+                color: "#d4ac0d"
+                data_generator: |
+                  const raw = entity.attributes.chart_data_usep;
+                  if (!raw || !raw.length) return [];
+                  return raw.filter(d => { const y=parseFloat(d.y)||0; return y>=200 && y<300; })
+                            .map(d => [new Date(d.x).getTime(), parseFloat(d.y)||0]);
+              - entity: sensor.usep_singapore_electricity_price_usep_forecast_data
+                name: "High"
+                type: column
+                color: "#e67e22"
+                data_generator: |
+                  const raw = entity.attributes.chart_data_usep;
+                  if (!raw || !raw.length) return [];
+                  return raw.filter(d => { const y=parseFloat(d.y)||0; return y>=300 && y<500; })
+                            .map(d => [new Date(d.x).getTime(), parseFloat(d.y)||0]);
+              - entity: sensor.usep_singapore_electricity_price_usep_forecast_data
+                name: "Extreme"
+                type: column
+                color: "#e74c3c"
+                data_generator: |
+                  const raw = entity.attributes.chart_data_usep;
+                  if (!raw || !raw.length) return [];
+                  return raw.filter(d => (parseFloat(d.y)||0) >= 500)
+                            .map(d => [new Date(d.x).getTime(), parseFloat(d.y)||0]);
+              - entity: sensor.usep_singapore_electricity_price_usep_forecast_data
+                name: "Demand MW"
+                type: line
+                color: "#9b59b6"
+                opacity: 0.4
+                stroke_width: 1.5
+                data_generator: |
+                  const raw = entity.attributes.chart_data_demand;
+                  if (!raw || !raw.length) return [];
+                  return raw.map(d => [new Date(d.x).getTime(), parseFloat(d.y)||0]);
+
+          ## ── All-periods table ────────────────────────────────────────────
+          - type: markdown
+            title: "USEP — All Periods Today"
+            content: >
+              {% set rows = state_attr('sensor.usep_singapore_electricity_price_usep_forecast_data','forecast_table') %}
+              {% if rows and rows | length > 0 %}
+              <table width="100%" style="border-collapse:collapse;font-size:0.9em;">
+              <tr style="border-bottom:1px solid #444;color:#888;">
+                <th style="text-align:left;padding:4px 8px;">Period</th>
+                <th style="text-align:right;padding:4px 8px;">USEP $/MWh</th>
+                <th style="text-align:right;padding:4px 8px;">Demand MW</th>
+                <th style="text-align:right;padding:4px 8px;">Solar MW</th>
+                <th style="text-align:center;padding:4px 8px;">Type</th>
+              </tr>
+              {% for r in rows %}
+              {% set u = r.usep | float(0) %}
+              {% if u >= 500 %}{% set bg = "rgba(231,76,60,0.15)" %}{% set badge = "🔴🔴" %}
+              {% elif u >= 300 %}{% set bg = "rgba(230,126,34,0.15)" %}{% set badge = "🔴" %}
+              {% elif u >= 200 %}{% set bg = "rgba(212,172,13,0.10)" %}{% set badge = "🟡" %}
+              {% else %}{% set bg = "transparent" %}{% set badge = "" %}
+              {% endif %}
+              <tr style="border-bottom:1px solid #333;background:{{ bg }}{% if r.is_current %};font-weight:bold{% endif %};">
+                <td style="padding:4px 8px;">{{ "▶ " if r.is_current else "&nbsp;&nbsp;&nbsp;" }}{{ r.period }}</td>
+                <td style="text-align:right;padding:4px 8px;">{{ badge }} ${{ "%.2f" | format(u) }}</td>
+                <td style="text-align:right;padding:4px 8px;">{{ r.demand if r.demand else "—" }}</td>
+                <td style="text-align:right;padding:4px 8px;">{{ r.solar if r.solar else "—" }}</td>
+                <td style="text-align:center;padding:4px 8px;">{{ "🔮" if r.status == "Forecast" else "✅" }}</td>
+              </tr>
+              {% endfor %}
+              </table>
+              <small style="color:#888;">▶ current &nbsp; ✅ settled &nbsp; 🔮 forecast &nbsp; 🔴🔴 ≥$500 &nbsp; 🔴 ≥$300 &nbsp; 🟡 ≥$200</small>
+              {% else %}
+              *Waiting for data — will populate at the next :02 or :32 past the hour.*
+              {% endif %}
+
+          ## ── Footer ───────────────────────────────────────────────────────
+          - type: markdown
+            content: >
+              {% set ts     = state_attr('sensor.usep_singapore_electricity_price_usep_forecast_data','last_updated') %}
+              {% set status = state_attr('sensor.usep_singapore_electricity_price_usep_forecast_data','data_status') %}
+              {% set total  = state_attr('sensor.usep_singapore_electricity_price_usep_forecast_data','periods_total') %}
+              {% set fc     = state_attr('sensor.usep_singapore_electricity_price_usep_forecast_data','periods_forecast') %}
+              **Source:** EMC NEMS &nbsp;|&nbsp;
+              **Status:** {% if status == 'forecast_pending' %}⏳ Forecast pending{% elif status == 'confirmed' %}✅ Confirmed{% else %}⚠️ No data{% endif %} &nbsp;|&nbsp;
+              **Periods:** {{ total if total else '—' }} total, {{ fc if fc else '—' }} forecast &nbsp;|&nbsp;
+              **Last fetch:** {% if ts %}{{ ts[0:10] }} {{ ts[11:16] }} SGT{% else %}never{% endif %}
