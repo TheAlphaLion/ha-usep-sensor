@@ -163,7 +163,7 @@ To use it:
 
 ## Advanced usage
 
-For price-threshold helpers (editable sliders), battery automations, and arbitrage scheduling logic, see [`examples/`](examples/).
+For price-threshold helpers (editable sliders), EcoFlow battery automations, and arbitrage scheduling logic, see [`examples/`](examples/).
 
 ---
 
@@ -171,8 +171,31 @@ For price-threshold helpers (editable sliders), battery automations, and arbitra
 
 - Data comes from EMC's public [NEMS Prices page](https://www.nems.emcsg.com/nems-prices) — the same source you see when you open that page in a browser
 - Prices are **provisional** and subject to revision up to D+6 business days
-- Future-period prices are **forecasts** that can shift, especially before gate close (~30 min before period start)
-- This integration uses EMC's public-facing web endpoints, not the paid NEMS API subscription. EMC may change these endpoints without notice. If the integration stops working, check [GitHub Issues](https://github.com/YOUR_GITHUB_USERNAME/ha-usep-sensor/issues)
+- Future-period prices are **forecasts** that can shift significantly, especially before gate close (~30 min before period start)
+- This integration uses EMC's public-facing web endpoints, not the paid NEMS API subscription. EMC may change these endpoints without notice. If the integration stops working, check [GitHub Issues](https://github.com/TheAlphaLion/ha-usep-sensor/issues)
+
+---
+
+## ⚠️ Disclaimer
+
+**Terms of use:** EMC's [Terms and Conditions](https://www.emcsg.com/termsandconditions) state that data from their website is provided for **personal and non-commercial use only**, and that all price data and materials are copyright of EMC. This integration accesses the same public endpoints used by the NEMS Prices webpage.
+
+By installing and using this integration, you agree that:
+
+- You are solely responsible for ensuring your use complies with EMC's Terms and Conditions and any applicable laws
+- This integration is intended for **personal, non-commercial home automation use only**
+- The author(s) of this integration accept **no responsibility or liability** for any consequences arising from its use, including but not limited to: breach of EMC's Terms of Use, incorrect or delayed price data, financial decisions made based on this data, or any disruption to your home systems or appliances
+- **This is not financial or energy trading advice.** USEP prices shown are indicative and provisional only
+
+If you are uncertain whether your use is permitted, consult EMC's Terms and Conditions directly or contact EMC at their [official website](https://www.emcsg.com).
+
+EMC offers a [paid data subscription service](https://www.emcsg.com/datasubscription) for those requiring a formally licensed, reliable data feed.
+
+---
+
+## AI attribution
+
+This integration was developed with the assistance of [Claude AI](https://claude.ai) (Anthropic). The code was written, tested, and published by [@TheAlphaLion](https://github.com/TheAlphaLion).
 
 ---
 
