@@ -71,7 +71,7 @@ Each half-hour period has two update moments:
 | Time | What happens |
 |---|---|
 | `HH:00` and `HH:30` | Period pointer advances immediately using cached forecast. `data_status = forecast_pending` |
-| `HH:02` + random second | Fresh data fetched from EMC. `data_status = confirmed` |
+| `HH:02` and `HH:32` + random second | Fresh data fetched from EMC. `data_status = confirmed` |
 
 The random second (10–55s, fixed per HA instance at startup) spreads load across users so everyone doesn't hit EMC at exactly the same moment. Automations can check `data_status` to distinguish forecast-based actions from confirmed ones.
 
