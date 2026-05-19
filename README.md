@@ -150,7 +150,7 @@ automation:
 
 ---
 
-## Lovelace dashboard
+## Lovelace dashboard [TO BE COMPLETED]
 
 An example dashboard with a full-day chart and forecast table is provided in [`examples/dashboard.yaml`](examples/dashboard.yaml).
 
@@ -162,9 +162,9 @@ To use it:
 
 ---
 
-## Advanced usage
+## Advanced usage [TO BE COMPLETED]
 
-For price-threshold helpers (editable sliders), EcoFlow battery automations, and arbitrage scheduling logic, see [`examples/`](examples/).
+For price-threshold helpers (editable sliders), battery automations, and arbitrage scheduling logic, see [`examples/`](examples/).
 
 ---
 
