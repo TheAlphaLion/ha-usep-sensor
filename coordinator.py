@@ -150,6 +150,11 @@ class USEPCoordinator(DataUpdateCoordinator):
                             return None
                         raw = json.loads(await resp.text())
 
+            # Endpoint returned a non-JSON response (e.g. HTML redirect/error page)
+            if not isinstance(raw, (list, dict)):
+                _LOGGER.debug("USEP JSON endpoint: unexpected response type %s", type(raw).__name__)
+                return None
+
             rows = raw if isinstance(raw, list) else (
                 raw.get("data") or raw.get("Data") or raw.get("Result") or []
             )
