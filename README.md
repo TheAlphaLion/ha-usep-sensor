@@ -12,7 +12,7 @@ Designed for households on **SP Group's Wholesale Electricity Price (WEP/USEP) p
 
 ## What it does
 
-The EMC publishes all 48 half-hour USEP prices for the current day — both settled prices for past periods and forecast prices for future periods. This integration polls that data and makes it available in Home Assistant so you can for example:
+The EMC publishes all 48 half-hour USEP prices for the current day — both settled prices for past periods and forecast prices for future periods. This integration polls that data and makes it available in Home Assistant as sensors that you can use it for further purposes, for example:
 
 - See the current, next, peak, and cheapest forecast prices on a dashboard
 - Build automations that trigger when prices are high (shift loads to battery) or low (charge battery, run water heater)
