@@ -82,14 +82,14 @@ The random second (10–55s, fixed per HA instance at startup) spreads load acro
 ### Via HACS (recommended)
 
 1. In HA: **HACS → Integrations → ⋮ → Custom repositories**
-2. Add URL: `https://github.com/YOUR_GITHUB_USERNAME/ha-usep-sensor`
+2. Add URL: `https://github.com/TheAlphaLion/ha-usep-sensor`
 3. Category: **Integration** → Add
 4. Find **USEP — Singapore Electricity Price** → Install
 5. Restart Home Assistant
 
 ### Manual
 
-1. Download the latest release from [GitHub Releases](https://github.com/YOUR_GITHUB_USERNAME/ha-usep-sensor/releases)
+1. Download the latest release from [GitHub Releases](https://github.com/TheAlphaLion/ha-usep-sensor/releases)
 2. Copy the `custom_components/usep/` folder into your HA `config/custom_components/` directory
 3. Restart Home Assistant
 
