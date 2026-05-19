@@ -163,7 +163,7 @@ To use it:
 
 ## Advanced usage
 
-For price-threshold helpers (editable sliders), EcoFlow battery automations, and arbitrage scheduling logic, see [`examples/`](examples/).
+For price-threshold helpers (editable sliders), battery automations, and arbitrage scheduling logic, see [`examples/`](examples/).
 
 ---
 
