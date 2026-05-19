@@ -16,7 +16,7 @@ The EMC publishes all 48 half-hour USEP prices for the current day — both sett
 
 Examples of further uses of the USEP sensors:
 - See the current, next, peak, and cheapest forecast prices on a dashboard
-- Build automations that trigger when prices are high (shift loads to battery) or low (charge battery, run water heater)
+- Build automations that trigger when prices are high (shift loads to battery, pause high power devices) or low (charge battery, run water heater)
 - Display a full-day price chart and forecast table in Lovelace
 
 ---
