@@ -7,7 +7,7 @@ ATTRIBUTION = "Data provided by Energy Market Company (EMC), Singapore"
 BASE_URL = "https://www.nems.emcsg.com/api/sitecore/DataSync"
 
 # Primary: live JSON used by the website chart — returns all 48 periods for today
-ENDPOINT_JSON = f"{BASE_URL}/Get?value=10&fromDate=&toDate="
+ENDPOINT_JSON = f"{BASE_URL}/Get?value=10&fromDate={{date}}&toDate={{date}}&tpcValue=1"
 
 # Fallback: public CSV download — confirmed working, returns same data as tab-separated
 ENDPOINT_CSV = f"{BASE_URL}/DataDownload?value=10&fromDate={{date}}&toDate={{date}}&tpcValue=1"
