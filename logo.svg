@@ -1,0 +1,33 @@
+<svg width="512" height="512" viewBox="0 0 680 680" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>USEP logo</title>
+<desc>Circular navy logo: USEP text with amber lightning bolt over the S</desc>
+
+<defs>
+  <clipPath id="ring"><circle cx="340" cy="340" r="298"/></clipPath>
+</defs>
+
+<circle cx="340" cy="340" r="320" fill="#1a2744"/>
+<circle cx="340" cy="340" r="300" fill="#0f1a35"/>
+<circle cx="340" cy="340" r="300" fill="none" stroke="#f5a623" stroke-width="12"/>
+
+<g clip-path="url(#ring)">
+
+<text
+  x="340" y="408"
+  text-anchor="middle"
+  font-family="Arial Black, Arial, sans-serif"
+  font-size="168"
+  font-weight="900"
+  fill="#ffffff"
+  letter-spacing="-4">USEP</text>
+
+<polygon
+  points="293,213  261,368  285,368  255,493  315,353  289,353  321,213"
+  fill="#0f1a35"/>
+
+<polygon
+  points="290,210  258,366  282,366  252,490  312,350  286,350  318,210"
+  fill="#f5a623"/>
+
+</g>
+</svg>
