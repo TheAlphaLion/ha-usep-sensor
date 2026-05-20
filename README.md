@@ -1,6 +1,7 @@
 # USEP — Singapore Electricity Price
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+![USEP Logo](logo.svg)
 [![GitHub release](https://img.shields.io/github/v/release/TheAlphaLion/ha-usep-sensor)](https://github.com/TheAlphaLion/ha-usep-sensor/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
