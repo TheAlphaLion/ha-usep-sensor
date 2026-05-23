@@ -4,9 +4,12 @@
 [![GitHub release](https://img.shields.io/github/v/release/TheAlphaLion/ha-usep-sensor)](https://github.com/TheAlphaLion/ha-usep-sensor/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A Home Assistant custom integration that fetches **real-time and forecast Singapore electricity prices (USEP)** from the [Energy Market Company (EMC) NEMS Prices page](https://www.nems.emcsg.com/nems-prices) and exposes them as sensor entities.
+<img src="logo.svg" alt="USEP Logo" width="100"/>
 
-Designed for households on **SP Group's Wholesale Electricity Price (WEP/USEP) plan** who want to automate load-shifting, battery charging, and appliance scheduling based on live price forecasts.
+A Home Assistant custom integration that fetches **real-time and forecast Uniform Singapore Energy Price (USEP)** from the [Energy Market Company (EMC) NEMS Prices page](https://www.nems.emcsg.com/nems-prices) and exposes them as sensor entities.
+
+Designed for households on **SP Group's Wholesale Electricity Price plan** who want to automate load-shifting, battery charging, and appliance scheduling based on live price forecasts.
+Designed mainly for households on **SP Group's Wholesale Electricity Price plan** who want to automate load-shifting, battery charging, and appliance scheduling based on live price forecasts. 
 
 ---
 
