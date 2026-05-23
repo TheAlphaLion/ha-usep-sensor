@@ -14,11 +14,10 @@ Update schedule (two triggers per half-hour period):
     when this integration is used by many people.
     Sets data_status = "confirmed" once the settled price is retrieved.
 
-Data sources (tried in order):
-  1. JSON  GET /api/sitecore/DataSync/Get?value=10&fromDate=&toDate=
-  2. CSV   GET /api/sitecore/DataSync/DataDownload?value=10&fromDate=...
+Data source:
+  CSV  GET /api/sitecore/DataSync/DataDownload?value=10&fromDate=...
 
-Both sources include the full 48 half-hour periods for today:
+The CSV includes all 48 half-hour periods for today:
   - Past periods have settled USEP (RUSEP column populated)
   - Future periods have forecast USEP (RUSEP column is "-")
 """
@@ -27,7 +26,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import logging
 import random
 from datetime import datetime, timedelta
@@ -42,7 +40,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    DOMAIN, ENDPOINT_JSON, ENDPOINT_CSV, REQUEST_HEADERS, SG_TIMEZONE,
+    DOMAIN, ENDPOINT_CSV, REQUEST_HEADERS, SG_TIMEZONE,
     CSV_COL_DATE, CSV_COL_PERIOD, CSV_COL_DEMAND,
     CSV_COL_SOLAR, CSV_COL_USEP, CSV_COL_RUSEP,
 )
@@ -119,15 +117,12 @@ class USEPCoordinator(DataUpdateCoordinator):
         now_sg = dt_util.now().astimezone(dt_util.get_time_zone(SG_TIMEZONE))
         today  = now_sg.strftime("%Y-%m-%d")
 
-        periods = (
-            await self._fetch_json(now_sg)
-            or await self._fetch_csv(today)
-        )
+        periods = await self._fetch_csv(today)
 
         if periods:
             self._cached_periods = periods
         elif self._cached_periods:
-            _LOGGER.warning("USEP: all fetches failed — using cached data")
+            _LOGGER.warning("USEP: fetch failed — using cached data from previous cycle")
             periods = self._cached_periods
         else:
             raise UpdateFailed(
@@ -137,79 +132,27 @@ class USEPCoordinator(DataUpdateCoordinator):
 
         return _process(periods, now_sg, confirmed=True)
 
-    # ── Fetch strategies ──────────────────────────────────────────────────────
-
-    async def _fetch_json(self, now_sg: datetime) -> list[dict] | None:
-        """Try the live JSON endpoint used by the EMC website chart."""
-        try:
-            async with async_timeout.timeout(15):
-                async with aiohttp.ClientSession(headers=REQUEST_HEADERS) as session:
-                    async with session.get(ENDPOINT_JSON) as resp:
-                        if resp.status != 200:
-                            _LOGGER.debug("USEP JSON endpoint: HTTP %s", resp.status)
-                            return None
-                        raw = json.loads(await resp.text())
-
-            # Endpoint returned a non-JSON response (e.g. HTML redirect/error page)
-            if not isinstance(raw, (list, dict)):
-                _LOGGER.debug("USEP JSON endpoint: unexpected response type %s", type(raw).__name__)
-                return None
-
-            rows = raw if isinstance(raw, list) else (
-                raw.get("data") or raw.get("Data") or raw.get("Result") or []
-            )
-            if not rows:
-                return None
-
-            today = now_sg.date()
-            periods = []
-            for item in rows:
-                period = (
-                    item.get("Period") or item.get("period")
-                    or item.get("TradingPeriod") or ""
-                )
-                usep   = _to_float(item.get("USEP") or item.get("usep") or item.get("Price"))
-                demand = _to_float(item.get("Demand") or item.get("demand"))
-                solar  = _to_float(item.get("Solar") or item.get("solar"))
-                rusep  = str(item.get("RUSEP") or item.get("rusep") or "-").strip()
-
-                if usep is None:
-                    continue
-                periods.append({
-                    "period":      period,
-                    "period_dt":   _period_to_dt(period, today),
-                    "demand":      demand,
-                    "solar":       solar,
-                    "usep":        usep,
-                    "is_forecast": rusep in ("-", "", "—", "null", "None"),
-                })
-
-            _LOGGER.debug("USEP JSON: %d periods", len(periods))
-            return periods or None
-
-        except Exception as exc:
-            _LOGGER.debug("USEP JSON fetch failed: %s", exc)
-            return None
+    # ── CSV fetch ─────────────────────────────────────────────────────────────
 
     async def _fetch_csv(self, today: str) -> list[dict] | None:
-        """Fall back to the confirmed-working CSV download endpoint."""
+        """Fetch today's USEP data from the EMC CSV download endpoint."""
         url = ENDPOINT_CSV.format(date=today)
         try:
             async with async_timeout.timeout(20):
                 async with aiohttp.ClientSession(headers=REQUEST_HEADERS) as session:
                     async with session.get(url) as resp:
                         if resp.status != 200:
-                            _LOGGER.warning("USEP CSV endpoint: HTTP %s", resp.status)
+                            _LOGGER.warning("USEP: CSV endpoint returned HTTP %s", resp.status)
                             return None
                         text = await resp.text()
 
             from datetime import date as date_t
             periods = _parse_csv(text, date_t.fromisoformat(today))
-            _LOGGER.debug("USEP CSV: %d periods", len(periods))
+            _LOGGER.debug("USEP: CSV fetch successful — %d periods", len(periods))
             return periods or None
 
         except Exception as exc:
-            _LOGGER.error("USEP CSV fetch failed: %s", exc)
+            _LOGGER.error("USEP: CSV fetch failed: %s", exc)
             return None
 
 
@@ -240,19 +183,30 @@ def _process(periods: list[dict], now_sg: datetime, confirmed: bool) -> dict[str
     # Future periods = anything that hasn't started yet
     future = [p for p in periods if p["period_dt"] and p["period_dt"] > now_sg]
 
-    # Peak across current + all remaining
+    # Peak forecast = highest USEP across current + all remaining periods
     remaining = ([current] if current else []) + future
-    peak = max((p["usep"] for p in remaining), default=None)
+    peak_forecast = max((p["usep"] for p in remaining), default=None)
 
-    # Lowest-USEP future period (best time to charge a battery)
-    lowest = lowest_label = lowest_dt = None
+    # Peak today = highest USEP across ALL 48 periods (settled + forecast)
+    peak_today = max((p["usep"] for p in periods), default=None)
+
+    # Lowest today = lowest USEP across ALL 48 periods (settled + forecast)
+    # Use for battery charging decisions — finds the true daily minimum
+    # regardless of whether it has already passed
+    lowest_today_row   = min(periods, key=lambda p: p["usep"]) if periods else None
+    lowest_today       = lowest_today_row["usep"]     if lowest_today_row else None
+    lowest_today_label = lowest_today_row["period"]   if lowest_today_row else None
+    lowest_today_dt    = lowest_today_row["period_dt"] if lowest_today_row else None
+
+    # Lowest forecast = lowest USEP among remaining (future) periods only
+    lowest_forecast = lowest_forecast_label = lowest_forecast_dt = None
     if future:
         lr = min(future, key=lambda p: p["usep"])
-        lowest       = lr["usep"]
-        lowest_label = lr["period"]
-        lowest_dt    = lr["period_dt"]
+        lowest_forecast       = lr["usep"]
+        lowest_forecast_label = lr["period"]
+        lowest_forecast_dt    = lr["period_dt"]
 
-    # Data for the chart and table — all periods with valid USEP
+    # Chart data — ISO timestamp strings as x for ApexCharts time axis
     chart_usep = [
         {"x": p["period_dt"].isoformat(), "y": round(p["usep"], 2)}
         for p in periods if p.get("period_dt") and p.get("usep") is not None
@@ -265,6 +219,8 @@ def _process(periods: list[dict], now_sg: datetime, confirmed: bool) -> dict[str
         {"x": p["period_dt"].isoformat(), "y": round(p["solar"] or 0, 1)}
         for p in periods if p.get("period_dt")
     ]
+
+    # Table — native Python list, iterable directly in Jinja2
     table = [
         {
             "period":     p["period"],
@@ -279,19 +235,25 @@ def _process(periods: list[dict], now_sg: datetime, confirmed: bool) -> dict[str
 
     return {
         # ── Primary sensors ───────────────────────────────────────────────────
-        "current_usep":    current["usep"]   if current else None,
-        "next_usep":       next_period["usep"] if next_period else None,
-        "current_demand":  current["demand"] if current else None,
-        "current_solar":   current["solar"]  if current else None,
-        "current_period":  current["period"] if current else None,
-        "peak_usep_today": peak,
-        "lowest_forecast_usep":    lowest,
-        "lowest_forecast_period":  lowest_label,
-        "lowest_forecast_dt":      lowest_dt.isoformat() if lowest_dt else None,
+        "current_usep":           current["usep"]        if current      else None,
+        "next_usep":              next_period["usep"]    if next_period  else None,
+        "current_demand":         current["demand"]      if current      else None,
+        "current_solar":          current["solar"]       if current      else None,
+        "current_period":         current["period"]      if current      else None,
+        "peak_usep_forecast":      peak_forecast,
+        "peak_usep_today":          peak_today,
+        "lowest_usep_today":        lowest_today,
+        "lowest_usep_today_period": lowest_today_label,
+        "lowest_usep_today_dt":     lowest_today_dt.isoformat() if lowest_today_dt else None,
+        "lowest_forecast_usep":     lowest_forecast,
+        "lowest_forecast_period":   lowest_forecast_label,
+        "lowest_forecast_dt":       lowest_forecast_dt.isoformat() if lowest_forecast_dt else None,
         # ── Status ────────────────────────────────────────────────────────────
-        "data_status":          "forecast_pending" if not confirmed else "confirmed",
-        "data_confirmed":       confirmed,
-        "current_is_forecast":  (not confirmed) or (current.get("is_forecast", False) if current else False),
+        "data_status":         "forecast_pending" if not confirmed else "confirmed",
+        "data_confirmed":      confirmed,
+        "current_is_forecast": (not confirmed) or (
+            current.get("is_forecast", False) if current else False
+        ),
         # ── Chart + table ─────────────────────────────────────────────────────
         "chart_data_usep":   chart_usep,
         "chart_data_demand": chart_demand,
