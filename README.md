@@ -4,21 +4,18 @@
 [![GitHub release](https://img.shields.io/github/v/release/TheAlphaLion/ha-usep-sensor)](https://github.com/TheAlphaLion/ha-usep-sensor/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-<img src="logo.svg" alt="USEP Logo" width="100"/>
+A Home Assistant custom integration that fetches **real-time and forecast Singapore electricity prices (USEP)** from the [Energy Market Company (EMC) NEMS Prices page](https://www.nems.emcsg.com/nems-prices) and exposes them as sensor entities.
 
-A Home Assistant custom integration that fetches **real-time and forecast Uniform Singapore Energy Price (USEP)** from the [Energy Market Company (EMC) NEMS Prices page](https://www.nems.emcsg.com/nems-prices) and exposes them as sensor entities.
-
-Designed mainly for households on **SP Group's Wholesale Electricity Price plan** who want to automate load-shifting, battery charging, and appliance scheduling based on live price forecasts. 
+Designed for households on **SP Group's Wholesale Electricity Price (WEP/USEP) plan** who want to automate load-shifting, battery charging, and appliance scheduling based on live price forecasts.
 
 ---
 
 ## What it does
 
-The EMC publishes all 48 half-hour USEP prices for the current day — both settled prices for past periods and forecast prices for future periods. This integration polls that data and makes it available in Home Assistant as sensors that you can use it for further purposes.
+The EMC publishes all 48 half-hour USEP prices for the current day — both settled prices for past periods and forecast prices for future periods. This integration polls that data and makes it available in Home Assistant so you can:
 
-Examples of further uses of the USEP sensors:
 - See the current, next, peak, and cheapest forecast prices on a dashboard
-- Build automations that trigger when prices are high (shift loads to battery, pause high power devices) or low (charge battery, run water heater)
+- Build automations that trigger when prices are high (shift loads to battery) or low (charge battery, run water heater)
 - Display a full-day price chart and forecast table in Lovelace
 
 ---
@@ -31,8 +28,10 @@ All sensors belong to a single device: **USEP — Singapore Electricity Price**
 |---|---|---|
 | `sensor.usep_current` | USEP for the current half-hour period | $/MWh |
 | `sensor.usep_next_period` | USEP for the next half-hour period | $/MWh |
-| `sensor.usep_peak_today` | Highest USEP remaining today | $/MWh |
-| `sensor.usep_lowest_forecast` | Lowest USEP remaining today | $/MWh |
+| `sensor.usep_peak_forecast` | Highest USEP across current + remaining periods today | $/MWh |
+| `sensor.usep_peak_today` | Highest USEP across all 48 periods today (settled + forecast) | $/MWh |
+| `sensor.usep_lowest_today` | Lowest USEP across all 48 periods today (settled + forecast) | $/MWh |
+| `sensor.usep_lowest_forecast` | Lowest USEP among remaining (future) periods only | $/MWh |
 | `sensor.grid_demand` | Current grid demand | MW |
 | `sensor.solar_generation` | Current solar generation | MW |
 | `sensor.usep_current_period` | Current period label e.g. `08:00-08:30` | — |
@@ -85,14 +84,14 @@ The random second (10–55s, fixed per HA instance at startup) spreads load acro
 ### Via HACS (recommended)
 
 1. In HA: **HACS → Integrations → ⋮ → Custom repositories**
-2. Add URL: `https://github.com/TheAlphaLion/ha-usep-sensor`
+2. Add URL: `https://github.com/YOUR_GITHUB_USERNAME/ha-usep-sensor`
 3. Category: **Integration** → Add
 4. Find **USEP — Singapore Electricity Price** → Install
 5. Restart Home Assistant
 
 ### Manual
 
-1. Download the latest release from [GitHub Releases](https://github.com/TheAlphaLion/ha-usep-sensor/releases)
+1. Download the latest release from [GitHub Releases](https://github.com/YOUR_GITHUB_USERNAME/ha-usep-sensor/releases)
 2. Copy the `custom_components/usep/` folder into your HA `config/custom_components/` directory
 3. Restart Home Assistant
 
@@ -130,13 +129,21 @@ automation:
 ```
 
 ### Charge battery at cheapest period
+
+Use `sensor.usep_lowest_today` (not `usep_lowest_forecast`) for charging decisions.
+`usep_lowest_today` looks at all 48 periods for the day, so it correctly identifies
+the true daily minimum even if it has already passed. `usep_lowest_forecast` only
+looks at remaining periods — if the cheapest period was at noon and it is now 11pm,
+`usep_lowest_forecast` would return the cheapest of the few remaining periods
+(which could be expensive), causing the battery to charge at the wrong time.
+
 ```yaml
 automation:
   trigger:
     - platform: template
       value_template: >
         {{ states('sensor.usep_current') | float(999)
-           <= states('sensor.usep_lowest_forecast') | float(999) + 1 }}
+           <= states('sensor.usep_lowest_today') | float(999) + 1 }}
   condition:
     - condition: numeric_state
       entity_id: sensor.usep_current
@@ -152,7 +159,7 @@ automation:
 
 ---
 
-## Lovelace dashboard [TO BE COMPLETED]
+## Lovelace dashboard
 
 An example dashboard with a full-day chart and forecast table is provided in [`examples/dashboard.yaml`](examples/dashboard.yaml).
 
@@ -164,9 +171,9 @@ To use it:
 
 ---
 
-## Advanced usage [TO BE COMPLETED]
+## Advanced usage
 
-For price-threshold helpers (editable sliders), battery automations, and arbitrage scheduling logic, see [`examples/`](examples/).
+For price-threshold helpers (editable sliders), EcoFlow battery automations, and arbitrage scheduling logic, see [`examples/`](examples/).
 
 ---
 
