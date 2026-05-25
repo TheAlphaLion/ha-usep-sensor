@@ -134,6 +134,44 @@ SENSORS: tuple[USEPSensorDescription, ...] = (
             "data_status",
         ],
     ),
+    # ── Tomorrow forecast sensors (value=12, available after noon SGT) ────────
+    USEPSensorDescription(
+        key="peak_usep_tomorrow",
+        data_key="peak_usep_tomorrow",
+        name="USEP Peak Tomorrow",
+        icon="mdi:chart-line-variant",
+        native_unit_of_measurement=UNIT_MWH,
+        state_class=SensorStateClass.MEASUREMENT,
+        extra_keys=["peak_usep_tomorrow_period", "peak_usep_tomorrow_dt", "tomorrow_available"],
+    ),
+    USEPSensorDescription(
+        key="lowest_usep_tomorrow",
+        data_key="lowest_usep_tomorrow",
+        name="USEP Lowest Tomorrow",
+        icon="mdi:arrow-down-bold-box",
+        native_unit_of_measurement=UNIT_MWH,
+        state_class=SensorStateClass.MEASUREMENT,
+        extra_keys=["lowest_usep_tomorrow_period", "lowest_usep_tomorrow_dt", "tomorrow_available"],
+    ),
+    USEPSensorDescription(
+        key="avg_usep_tomorrow",
+        data_key="avg_usep_tomorrow",
+        name="USEP Average Tomorrow",
+        icon="mdi:chart-bell-curve",
+        native_unit_of_measurement=UNIT_MWH,
+        state_class=SensorStateClass.MEASUREMENT,
+        extra_keys=["tomorrow_available", "periods_tomorrow"],
+    ),
+    USEPSensorDescription(
+        key="forecast_data_tomorrow",
+        data_key="forecast_table_tomorrow",   # state = len(forecast_table_tomorrow)
+        name="USEP Forecast Data Tomorrow",
+        icon="mdi:database-arrow-right",
+        extra_keys=[
+            "chart_data_usep_tomorrow", "forecast_table_tomorrow",
+            "periods_tomorrow", "tomorrow_available",
+        ],
+    ),
 )
 
 
@@ -175,9 +213,9 @@ class USEPSensor(CoordinatorEntity[USEPCoordinator], SensorEntity):
         if not self.coordinator.data:
             return None
 
-        # forecast_data: state is the count of loaded periods
-        if self.entity_description.key == "forecast_data":
-            table = self.coordinator.data.get("forecast_table") or []
+        # forecast_data / forecast_data_tomorrow: state is the count of loaded periods
+        if self.entity_description.key in ("forecast_data", "forecast_data_tomorrow"):
+            table = self.coordinator.data.get(self.entity_description.data_key) or []
             return len(table)
 
         return self.coordinator.data.get(self.entity_description.data_key)

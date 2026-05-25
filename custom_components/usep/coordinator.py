@@ -40,9 +40,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    DOMAIN, ENDPOINT_CSV, REQUEST_HEADERS, SG_TIMEZONE,
+    DOMAIN, ENDPOINT_JSON, ENDPOINT_CSV,
+    ENDPOINT_JSON_TOMORROW, ENDPOINT_CSV_TOMORROW,
+    REQUEST_HEADERS, SG_TIMEZONE,
     CSV_COL_DATE, CSV_COL_PERIOD, CSV_COL_DEMAND,
     CSV_COL_SOLAR, CSV_COL_USEP, CSV_COL_RUSEP,
+    TOMORROW_FORECAST_AVAILABLE_HOUR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,6 +58,8 @@ class USEPCoordinator(DataUpdateCoordinator):
         super().__init__(hass, _LOGGER, name=DOMAIN)
         self._unsub: list = []
         self._cached_periods: list[dict] = []
+        self._cached_tomorrow_periods: list[dict] = []
+        self._tomorrow_fetch_date: str | None = None   # date string for which we last fetched tomorrow
         # Random second within the :02/:32 minute — fixed per HA instance
         self._fetch_second: int = random.randint(10, 55)
         _LOGGER.info(
@@ -77,6 +82,15 @@ class USEPCoordinator(DataUpdateCoordinator):
             async_track_time_change(
                 self.hass, self._on_confirmed_fetch,
                 minute=[2, 32], second=self._fetch_second,
+            )
+        )
+        # Trigger 3: fetch tomorrow's 72-period forecast once after noon each day.
+        # Fires at 12:05:SS (same random second) to give EMC time to publish.
+        self._unsub.append(
+            async_track_time_change(
+                self.hass, self._on_noon_fetch,
+                hour=TOMORROW_FORECAST_AVAILABLE_HOUR, minute=5,
+                second=self._fetch_second,
             )
         )
         await self.async_refresh()
@@ -102,14 +116,37 @@ class USEPCoordinator(DataUpdateCoordinator):
         """Called at HH:02:SS and HH:32:SS — fetch fresh data from EMC."""
         self.hass.async_create_task(self.async_refresh())
 
+    @callback
+    def _on_noon_fetch(self, now: datetime) -> None:
+        """Called at 12:05:SS SGT — fetch the tomorrow 72-period forecast."""
+        self.hass.async_create_task(self._fetch_and_apply_tomorrow())
+
     async def _apply_cache(self, confirmed: bool) -> None:
         """Re-process cached periods without an HTTP fetch."""
         try:
             now_sg = dt_util.now().astimezone(dt_util.get_time_zone(SG_TIMEZONE))
             data = _process(self._cached_periods, now_sg, confirmed=confirmed)
+            data.update(_process_tomorrow(self._cached_tomorrow_periods, now_sg))
             self.async_set_updated_data(data)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("USEP: cache re-process failed: %s", exc)
+
+    async def _fetch_and_apply_tomorrow(self) -> None:
+        """Fetch tomorrow forecast in the background and push an update."""
+        now_sg = dt_util.now().astimezone(dt_util.get_time_zone(SG_TIMEZONE))
+        today = now_sg.strftime("%Y-%m-%d")
+        periods = await self._fetch_csv_tomorrow(today)
+        if periods:
+            self._cached_tomorrow_periods = periods
+            self._tomorrow_fetch_date = today
+            _LOGGER.debug(
+                "USEP: tomorrow forecast cached — %d periods for next day", len(periods)
+            )
+        # Merge into current coordinator data and push update
+        if self.data:
+            updated = dict(self.data)
+            updated.update(_process_tomorrow(self._cached_tomorrow_periods, now_sg))
+            self.async_set_updated_data(updated)
 
     # ── Main fetch ────────────────────────────────────────────────────────────
 
@@ -130,29 +167,116 @@ class USEPCoordinator(DataUpdateCoordinator):
                 "Check HA logs and verify nems.emcsg.com is reachable."
             )
 
-        return _process(periods, now_sg, confirmed=True)
+        data = _process(periods, now_sg, confirmed=True)
+
+        # Fetch tomorrow forecast if it's past noon and we haven't fetched for today yet
+        if (
+            now_sg.hour >= TOMORROW_FORECAST_AVAILABLE_HOUR
+            and self._tomorrow_fetch_date != today
+        ):
+            tomorrow_periods = await self._fetch_csv_tomorrow(today)
+            if tomorrow_periods:
+                self._cached_tomorrow_periods = tomorrow_periods
+                self._tomorrow_fetch_date = today
+
+        data.update(_process_tomorrow(self._cached_tomorrow_periods, now_sg))
+        return data
 
     # ── CSV fetch ─────────────────────────────────────────────────────────────
 
+    async def _fetch_csv_tomorrow(self, today: str) -> list[dict] | None:
+        """
+        Fetch the 72-period forecast (value=12 endpoint), JSON-primary / CSV-fallback.
+
+        Filters the response to return only tomorrow's 24 periods.
+        Only call this after TOMORROW_FORECAST_AVAILABLE_HOUR SGT.
+        """
+        from datetime import date as date_t, timedelta as td
+        tomorrow_date = date_t.fromisoformat(today) + td(days=1)
+        all_periods = await self._fetch_periods(
+            json_url=ENDPOINT_JSON_TOMORROW.format(date=today),
+            csv_url=ENDPOINT_CSV_TOMORROW.format(date=today),
+            base_date=date_t.fromisoformat(today),
+            label="tomorrow",
+        )
+        if all_periods is None:
+            return None
+        tomorrow_periods = [
+            p for p in all_periods
+            if p.get("period_dt") and p["period_dt"].date() == tomorrow_date
+        ]
+        _LOGGER.debug(
+            "USEP: tomorrow forecast — %d tomorrow periods (of %d total in response)",
+            len(tomorrow_periods), len(all_periods),
+        )
+        return tomorrow_periods or None
+
     async def _fetch_csv(self, today: str) -> list[dict] | None:
-        """Fetch today's USEP data from the EMC CSV download endpoint."""
-        url = ENDPOINT_CSV.format(date=today)
+        """Fetch today's 48-period data, JSON-primary / CSV-fallback."""
+        from datetime import date as date_t
+        return await self._fetch_periods(
+            json_url=ENDPOINT_JSON.format(date=today),
+            csv_url=ENDPOINT_CSV.format(date=today),
+            base_date=date_t.fromisoformat(today),
+            label="today",
+        )
+
+    async def _fetch_periods(
+        self,
+        json_url: str,
+        csv_url: str,
+        base_date,
+        label: str,
+    ) -> list[dict] | None:
+        """
+        Shared fetch helper: try JSON endpoint first, fall back to CSV.
+
+        The JSON endpoint (/Get) returns an array of objects; the CSV
+        endpoint (/DataDownload) returns tab-separated rows.  Both carry
+        the same underlying data.
+        """
+        # ── Attempt 1: JSON (primary) ─────────────────────────────────────────
         try:
             async with async_timeout.timeout(20):
                 async with aiohttp.ClientSession(headers=REQUEST_HEADERS) as session:
-                    async with session.get(url) as resp:
+                    async with session.get(json_url) as resp:
+                        if resp.status == 200:
+                            payload = await resp.json(content_type=None)
+                            periods = _parse_json(payload, base_date)
+                            if periods:
+                                _LOGGER.debug(
+                                    "USEP: JSON fetch (%s) OK — %d periods", label, len(periods)
+                                )
+                                return periods
+                            _LOGGER.warning(
+                                "USEP: JSON fetch (%s) returned empty payload — trying CSV", label
+                            )
+                        else:
+                            _LOGGER.warning(
+                                "USEP: JSON endpoint (%s) returned HTTP %s — trying CSV",
+                                label, resp.status,
+                            )
+        except Exception as exc:
+            _LOGGER.warning("USEP: JSON fetch (%s) failed: %s — trying CSV", label, exc)
+
+        # ── Attempt 2: CSV (fallback) ─────────────────────────────────────────
+        try:
+            async with async_timeout.timeout(20):
+                async with aiohttp.ClientSession(headers=REQUEST_HEADERS) as session:
+                    async with session.get(csv_url) as resp:
                         if resp.status != 200:
-                            _LOGGER.warning("USEP: CSV endpoint returned HTTP %s", resp.status)
+                            _LOGGER.warning(
+                                "USEP: CSV endpoint (%s) returned HTTP %s", label, resp.status
+                            )
                             return None
                         text = await resp.text()
-
-            from datetime import date as date_t
-            periods = _parse_csv(text, date_t.fromisoformat(today))
-            _LOGGER.debug("USEP: CSV fetch successful — %d periods", len(periods))
-            return periods or None
-
+            periods = _parse_csv(text, base_date)
+            if periods:
+                _LOGGER.debug("USEP: CSV fetch (%s) OK — %d periods", label, len(periods))
+                return periods
+            return None
         except Exception as exc:
-            _LOGGER.error("USEP: CSV fetch failed: %s", exc)
+            _LOGGER.error("USEP: CSV fetch (%s) failed: %s", label, exc)
             return None
 
 
@@ -264,6 +388,116 @@ def _process(periods: list[dict], now_sg: datetime, confirmed: bool) -> dict[str
         "periods_total":    len(periods),
         "periods_forecast": len(future),
     }
+
+
+def _process_tomorrow(periods: list[dict], now_sg: datetime) -> dict[str, Any]:
+    """
+    Derive tomorrow-forecast values from the 24-period tomorrow list.
+
+    Returns a dict of  tomorrow_*  keys that are merged into the main
+    coordinator data dict.  When no data is available (before noon or if
+    the fetch failed) every value is None / False / empty-list so sensors
+    degrade gracefully rather than raising KeyError.
+    """
+    if not periods:
+        return {
+            "tomorrow_available":          False,
+            "peak_usep_tomorrow":          None,
+            "peak_usep_tomorrow_period":   None,
+            "peak_usep_tomorrow_dt":       None,
+            "lowest_usep_tomorrow":        None,
+            "lowest_usep_tomorrow_period": None,
+            "lowest_usep_tomorrow_dt":     None,
+            "avg_usep_tomorrow":           None,
+            "chart_data_usep_tomorrow":    [],
+            "forecast_table_tomorrow":     [],
+            "periods_tomorrow":            0,
+        }
+
+    periods = sorted(
+        periods,
+        key=lambda p: p["period_dt"] or datetime.min.replace(tzinfo=now_sg.tzinfo),
+    )
+
+    peak_row    = max(periods, key=lambda p: p["usep"])
+    lowest_row  = min(periods, key=lambda p: p["usep"])
+    usep_values = [p["usep"] for p in periods if p.get("usep") is not None]
+    avg_usep    = round(sum(usep_values) / len(usep_values), 2) if usep_values else None
+
+    chart_usep = [
+        {"x": p["period_dt"].isoformat(), "y": round(p["usep"], 2)}
+        for p in periods if p.get("period_dt") and p.get("usep") is not None
+    ]
+
+    table = [
+        {
+            "period": p["period"],
+            "usep":   round(p["usep"], 2) if p.get("usep") is not None else None,
+            "demand": round(p["demand"]) if p.get("demand") is not None else None,
+            "solar":  round(p["solar"], 1) if p.get("solar") is not None else None,
+            "status": "Forecast",   # tomorrow periods are always forecast
+        }
+        for p in periods if p.get("usep") is not None
+    ]
+
+    return {
+        "tomorrow_available":          True,
+        "peak_usep_tomorrow":          peak_row["usep"],
+        "peak_usep_tomorrow_period":   peak_row["period"],
+        "peak_usep_tomorrow_dt":       peak_row["period_dt"].isoformat() if peak_row["period_dt"] else None,
+        "lowest_usep_tomorrow":        lowest_row["usep"],
+        "lowest_usep_tomorrow_period": lowest_row["period"],
+        "lowest_usep_tomorrow_dt":     lowest_row["period_dt"].isoformat() if lowest_row["period_dt"] else None,
+        "avg_usep_tomorrow":           avg_usep,
+        "chart_data_usep_tomorrow":    chart_usep,
+        "forecast_table_tomorrow":     table,
+        "periods_tomorrow":            len(periods),
+    }
+
+# ── JSON parser ───────────────────────────────────────────────────────────────
+
+def _parse_json(payload: Any, today) -> list[dict]:
+    """
+    Parse the EMC /Get JSON response into the same period-dict format as _parse_csv.
+
+    The API returns a list of objects.  Known field names (discovered via
+    Chrome DevTools on nems.emcsg.com/nems-prices):
+      Date, Period, Demand, Solar, USEP, RUSEP  (names may vary in casing)
+    We do case-insensitive key lookup so minor server-side renames don't break parsing.
+    """
+    if not isinstance(payload, list):
+        # Some responses wrap the list in a dict — try common wrapper keys
+        if isinstance(payload, dict):
+            for key in ("data", "Data", "result", "Result", "records"):
+                if isinstance(payload.get(key), list):
+                    payload = payload[key]
+                    break
+        if not isinstance(payload, list):
+            _LOGGER.warning("USEP: JSON response has unexpected structure: %s", type(payload))
+            return []
+
+    periods = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        # Case-insensitive key lookup
+        ikeys = {k.lower(): v for k, v in item.items()}
+        usep = _to_float(ikeys.get("usep"))
+        if usep is None:
+            continue
+        date_raw  = str(ikeys.get("date", "")).strip()
+        base_date = _parse_date(date_raw) or today
+        period    = str(ikeys.get("period", "")).strip()
+        rusep_raw = str(ikeys.get("rusep", "-")).strip()
+        periods.append({
+            "period":      period,
+            "period_dt":   _period_to_dt(period, base_date),
+            "demand":      _to_float(ikeys.get("demand")),
+            "solar":       _to_float(ikeys.get("solar")),
+            "usep":        usep,
+            "is_forecast": rusep_raw in ("-", "", "—", "null", "None"),
+        })
+    return periods
 
 
 # ── CSV parser ────────────────────────────────────────────────────────────────

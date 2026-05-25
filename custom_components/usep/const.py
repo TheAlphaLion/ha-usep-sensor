@@ -12,6 +12,15 @@ ENDPOINT_JSON = f"{BASE_URL}/Get?value=10&fromDate={{date}}&toDate={{date}}&tpcV
 # Fallback: public CSV download — confirmed working, returns same data as tab-separated
 ENDPOINT_CSV = f"{BASE_URL}/DataDownload?value=10&fromDate={{date}}&toDate={{date}}&tpcValue=1"
 
+# Tomorrow 72-period forecast (value=12) — available after 12:00 noon SGT each day.
+# Returns 72 rows: today's 48 periods + tomorrow's first 24 (00:00–11:30).
+# Uses the same date parameter as the today endpoints (fetched on today's date).
+ENDPOINT_JSON_TOMORROW = f"{BASE_URL}/Get?value=12&fromDate={{date}}&toDate={{date}}&tpcValue=1"
+ENDPOINT_CSV_TOMORROW  = f"{BASE_URL}/DataDownload?value=12&fromDate={{date}}&toDate={{date}}&tpcValue=1"
+
+# Hour after which the tomorrow forecast becomes available (SGT, 24-hour)
+TOMORROW_FORECAST_AVAILABLE_HOUR = 12
+
 # CSV column indices (0-based, after skipping header row)
 CSV_COL_DATE   = 0
 CSV_COL_PERIOD = 1
