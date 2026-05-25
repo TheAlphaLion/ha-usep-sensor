@@ -14,10 +14,12 @@ Designed mainly for households on **SP Group's Wholesale Electricity Price plan*
 
 ## What it does
 
-The EMC publishes all 48 half-hour USEP prices for the current day — both settled prices for past periods and forecast prices for future periods. This integration polls that data and makes it available in Home Assistant so you can:
+The EMC publishes all 48 half-hour USEP prices for the current day — both settled prices for past periods and forecast prices for future periods. After noon each day, EMC also publishes a **72-period forecast** that extends into the first 24 periods of tomorrow (00:00–11:30). This integration polls both datasets and makes them available in Home Assistant so you can:
 
 - See the current, next, peak, and cheapest forecast prices on a dashboard
+- Plan ahead with tomorrow's peak, lowest, and average forecast prices (available after noon each day)
 - Build automations that trigger when prices are high (shift loads to battery) or low (charge battery, run water heater)
+- Pre-schedule battery charging for tomorrow's cheapest window, decided the night before
 - Display a full-day price chart and forecast table in Lovelace
 
 ---
@@ -25,6 +27,8 @@ The EMC publishes all 48 half-hour USEP prices for the current day — both sett
 ## Sensors created
 
 All sensors belong to a single device: **USEP — Singapore Electricity Price**
+
+### Today's sensors
 
 | Entity | Description | Unit |
 |---|---|---|
@@ -39,6 +43,17 @@ All sensors belong to a single device: **USEP — Singapore Electricity Price**
 | `sensor.usep_current_period` | Current period label e.g. `08:00-08:30` | — |
 | `sensor.usep_data_status` | `confirmed` or `forecast_pending` | — |
 | `sensor.usep_forecast_data` | Count of loaded periods; attributes contain full chart + table data | — |
+
+### Tomorrow's sensors *(available after 12:00 noon SGT)*
+
+| Entity | Description | Unit |
+|---|---|---|
+| `sensor.usep_peak_usep_tomorrow` | Highest forecast USEP across tomorrow's 24 periods | $/MWh |
+| `sensor.usep_lowest_usep_tomorrow` | Lowest forecast USEP across tomorrow's 24 periods | $/MWh |
+| `sensor.usep_avg_usep_tomorrow` | Average forecast USEP across tomorrow's 24 periods | $/MWh |
+| `sensor.usep_forecast_data_tomorrow` | Count of tomorrow periods loaded; attributes contain chart + table data | — |
+
+Tomorrow sensors return `unknown` before noon. They populate after the 12:05 SGT fetch and remain available until the next day's noon refresh.
 
 ### Key attributes
 
@@ -68,6 +83,21 @@ periods_forecast:  32
 last_updated:      "2026-05-09T08:02:34+08:00"
 ```
 
+**`sensor.usep_peak_usep_tomorrow`** / **`sensor.usep_lowest_usep_tomorrow`**
+```
+peak_usep_tomorrow_period:    "18:30-19:00"
+peak_usep_tomorrow_dt:        "2026-05-10T18:30:00+08:00"
+tomorrow_available:           true
+```
+
+**`sensor.usep_forecast_data_tomorrow`**
+```
+forecast_table_tomorrow:   [{period, usep, demand, solar, status}, ...]
+chart_data_usep_tomorrow:  [{x: "2026-05-10T00:00:00+08:00", y: 142.50}, ...]
+periods_tomorrow:          24
+tomorrow_available:        true
+```
+
 ### `data_status` explained
 
 Each half-hour period has two update moments:
@@ -76,6 +106,7 @@ Each half-hour period has two update moments:
 |---|---|
 | `HH:00` and `HH:30` | Period pointer advances immediately using cached forecast. `data_status = forecast_pending` |
 | `HH:02` and `HH:32` + random second | Fresh data fetched from EMC. `data_status = confirmed` |
+| `12:05` + random second | Tomorrow 72-period forecast fetched once. Tomorrow sensors populate. |
 
 The random second (10–55s, fixed per HA instance at startup) spreads load across users so everyone doesn't hit EMC at exactly the same moment. Automations can check `data_status` to distinguish forecast-based actions from confirmed ones.
 
@@ -104,7 +135,7 @@ The random second (10–55s, fixed per HA instance at startup) spreads load acro
 1. **Settings → Devices & Services → + Add Integration**
 2. Search for **USEP**
 3. Click Submit — no configuration needed
-4. All 9 sensors appear immediately under the device "USEP — Singapore Electricity Price"
+4. All 15 sensors appear immediately under the device "USEP — Singapore Electricity Price"
 
 ---
 
@@ -157,6 +188,32 @@ automation:
     - service: switch.turn_on
       target:
         entity_id: switch.your_battery_charger
+```
+
+### Pre-schedule battery charging for tomorrow's cheapest window
+
+Available after noon — lets you decide tonight what time to charge tomorrow.
+
+```yaml
+automation:
+  alias: "Pre-charge for tomorrow cheapest period"
+  trigger:
+    - platform: time
+      at: "21:00:00"
+  condition:
+    - condition: template
+      value_template: "{{ states('sensor.usep_forecast_data_tomorrow') | int(0) > 0 }}"
+    - condition: template
+      value_template: >
+        {{ state_attr('sensor.usep_lowest_usep_tomorrow', 'lowest_usep_tomorrow_period') is not none }}
+  action:
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "🔋 Tomorrow cheapest window"
+        message: >
+          Lowest tomorrow: {{ states('sensor.usep_lowest_usep_tomorrow') }} $/MWh
+          at {{ state_attr('sensor.usep_lowest_usep_tomorrow', 'lowest_usep_tomorrow_period') }}.
+          Peak tomorrow: {{ states('sensor.usep_peak_usep_tomorrow') }} $/MWh.
 ```
 
 ---
@@ -219,6 +276,7 @@ This integration was developed with the assistance of [Claude AI](https://claude
 | Sensors show `unavailable` | Check **Settings → System → Logs**, search for "usep". Usually a network issue reaching EMC. |
 | Chart shows "Loading..." | Ensure ApexCharts Card is installed via HACS and the frontend was reloaded |
 | `data_status` stuck on `forecast_pending` | EMC fetch at :02/:32 may have failed — check logs |
+| Tomorrow sensors show `unknown` after noon | The 12:05 fetch may have failed — check logs for "tomorrow". Will retry on next HA restart or manual reload. |
 
 ---
 
