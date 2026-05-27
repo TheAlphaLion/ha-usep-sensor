@@ -14,6 +14,11 @@ Update schedule (two triggers per half-hour period):
     when this integration is used by many people.
     Sets data_status = "confirmed" once the settled price is retrieved.
 
+  Trigger 3 — tomorrow forecast  12:05:SS SGT (once per day)
+    Fetches the 72-period forecast (value=12): today's remaining 24
+    periods (noon–midnight) + all 48 periods of tomorrow (00:00–23:30).
+    Only the 48 tomorrow periods are retained and surfaced as sensors.
+
 Data source:
   CSV  GET /api/sitecore/DataSync/DataDownload?value=10&fromDate=...
 
@@ -188,7 +193,7 @@ class USEPCoordinator(DataUpdateCoordinator):
         """
         Fetch the 72-period forecast (value=12 endpoint), JSON-primary / CSV-fallback.
 
-        Filters the response to return only tomorrow's 24 periods.
+        Filters the response to return only tomorrow's 48 periods.
         Only call this after TOMORROW_FORECAST_AVAILABLE_HOUR SGT.
         """
         from datetime import date as date_t, timedelta as td
@@ -392,7 +397,7 @@ def _process(periods: list[dict], now_sg: datetime, confirmed: bool) -> dict[str
 
 def _process_tomorrow(periods: list[dict], now_sg: datetime) -> dict[str, Any]:
     """
-    Derive tomorrow-forecast values from the 24-period tomorrow list.
+    Derive tomorrow-forecast values from the 48-period tomorrow list.
 
     Returns a dict of  tomorrow_*  keys that are merged into the main
     coordinator data dict.  When no data is available (before noon or if
