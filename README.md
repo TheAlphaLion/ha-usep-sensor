@@ -14,7 +14,7 @@ Designed mainly for households on **SP Group's Wholesale Electricity Price plan*
 
 ## What it does
 
-The EMC publishes all 48 half-hour USEP prices for the current day — both settled prices for past periods and forecast prices for future periods. After noon each day, EMC also publishes a **72-period forecast** that covers today's remaining 24 periods (noon–midnight) plus all 48 periods of tomorrow (00:00–23:30). This integration polls both datasets and makes them available in Home Assistant so you can:
+The EMC publishes all **48 half-hour USEP prices for the current day** — both settled prices for past periods and forecast prices for future periods. After noon each day, EMC also publishes a **72-period forecast** that covers today's remaining 24 periods (noon–midnight) plus all 48 periods of tomorrow (00:00–23:30). This integration polls both datasets and makes them available in Home Assistant so you can:
 
 - See the current, next, peak, and cheapest forecast prices on a dashboard
 - Plan ahead with tomorrow's peak, lowest, and average forecast prices (available after noon each day)
