@@ -14,7 +14,7 @@ Designed mainly for households on **SP Group's Wholesale Electricity Price plan*
 
 ## What it does
 
-The EMC publishes all 48 half-hour USEP prices for the current day — both settled prices for past periods and forecast prices for future periods. After noon each day, EMC also publishes a **72-period forecast** that extends into the first 24 periods of tomorrow (00:00–11:30). This integration polls both datasets and makes them available in Home Assistant so you can:
+The EMC publishes all 48 half-hour USEP prices for the current day — both settled prices for past periods and forecast prices for future periods. After noon each day, EMC also publishes a **72-period forecast** that covers today's remaining 24 periods (noon–midnight) plus all 48 periods of tomorrow (00:00–23:30). This integration polls both datasets and makes them available in Home Assistant so you can:
 
 - See the current, next, peak, and cheapest forecast prices on a dashboard
 - Plan ahead with tomorrow's peak, lowest, and average forecast prices (available after noon each day)
@@ -48,9 +48,9 @@ All sensors belong to a single device: **USEP — Singapore Electricity Price**
 
 | Entity | Description | Unit |
 |---|---|---|
-| `sensor.usep_peak_usep_tomorrow` | Highest forecast USEP across tomorrow's 24 periods | $/MWh |
-| `sensor.usep_lowest_usep_tomorrow` | Lowest forecast USEP across tomorrow's 24 periods | $/MWh |
-| `sensor.usep_avg_usep_tomorrow` | Average forecast USEP across tomorrow's 24 periods | $/MWh |
+| `sensor.usep_peak_usep_tomorrow` | Highest forecast USEP across tomorrow's 48 periods | $/MWh |
+| `sensor.usep_lowest_usep_tomorrow` | Lowest forecast USEP across tomorrow's 48 periods | $/MWh |
+| `sensor.usep_avg_usep_tomorrow` | Average forecast USEP across tomorrow's 48 periods | $/MWh |
 | `sensor.usep_forecast_data_tomorrow` | Count of tomorrow periods loaded; attributes contain chart + table data | — |
 
 Tomorrow sensors return `unknown` before noon. They populate after the 12:05 SGT fetch and remain available until the next day's noon refresh.
@@ -94,7 +94,7 @@ tomorrow_available:           true
 ```
 forecast_table_tomorrow:   [{period, usep, demand, solar, status}, ...]
 chart_data_usep_tomorrow:  [{x: "2026-05-10T00:00:00+08:00", y: 142.50}, ...]
-periods_tomorrow:          24
+periods_tomorrow:          48
 tomorrow_available:        true
 ```
 
