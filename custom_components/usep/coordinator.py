@@ -19,10 +19,22 @@ Update schedule (two triggers per half-hour period):
     periods (noon–midnight) + all 48 periods of tomorrow (00:00–23:30).
     Only the 48 tomorrow periods are retained and surfaced as sensors.
 
-Data source:
-  CSV  GET /api/sitecore/DataSync/DataDownload?value=10&fromDate=...
+next_usep at period 48 (23:30–00:00):
+  The today-only 48-period list has no period 49, so next_usep would
+  normally be None at 23:30.  If cached tomorrow periods are available,
+  the first tomorrow period (00:00–00:30) is used instead.
 
-The CSV includes all 48 half-hour periods for today:
+Outage continuity across midnight:
+  If the today fetch fails AND the cached today-data is from the
+  previous day AND cached tomorrow-periods cover the new day, those
+  tomorrow periods are promoted to the today cache.  This keeps all
+  sensors populated through overnight EMC outages without any gap.
+
+Data source:
+  JSON  GET /api/sitecore/DataSync/Get?value=10&fromDate=...   (primary)
+  CSV   GET /api/sitecore/DataSync/DataDownload?value=10&...   (fallback)
+
+The response includes all 48 half-hour periods for today:
   - Past periods have settled USEP (RUSEP column populated)
   - Future periods have forecast USEP (RUSEP column is "-")
 """
@@ -132,6 +144,14 @@ class USEPCoordinator(DataUpdateCoordinator):
             now_sg = dt_util.now().astimezone(dt_util.get_time_zone(SG_TIMEZONE))
             data = _process(self._cached_periods, now_sg, confirmed=confirmed)
             data.update(_process_tomorrow(self._cached_tomorrow_periods, now_sg))
+            # Supplement next_usep from tomorrow cache when at the last period of today
+            if data.get("next_usep") is None and self._cached_tomorrow_periods:
+                tomorrow_sorted = sorted(
+                    self._cached_tomorrow_periods,
+                    key=lambda p: p["period_dt"] or datetime.min.replace(tzinfo=now_sg.tzinfo),
+                )
+                if tomorrow_sorted:
+                    data["next_usep"] = tomorrow_sorted[0]["usep"]
             self.async_set_updated_data(data)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("USEP: cache re-process failed: %s", exc)
@@ -156,6 +176,7 @@ class USEPCoordinator(DataUpdateCoordinator):
     # ── Main fetch ────────────────────────────────────────────────────────────
 
     async def _async_update_data(self) -> dict[str, Any]:
+        from datetime import date as date_t, timedelta as td
         now_sg = dt_util.now().astimezone(dt_util.get_time_zone(SG_TIMEZONE))
         today  = now_sg.strftime("%Y-%m-%d")
 
@@ -164,7 +185,33 @@ class USEPCoordinator(DataUpdateCoordinator):
         if periods:
             self._cached_periods = periods
         elif self._cached_periods:
-            _LOGGER.warning("USEP: fetch failed — using cached data from previous cycle")
+            # ── Change 2: outage crossing midnight ───────────────────────────
+            # If the cached today-periods are from yesterday AND we have cached
+            # tomorrow-periods that cover today, promote them so the sensors
+            # keep working seamlessly through an overnight EMC outage.
+            cached_date = (
+                self._cached_periods[0]["period_dt"].date()
+                if self._cached_periods and self._cached_periods[0].get("period_dt")
+                else None
+            )
+            today_date = date_t.fromisoformat(today)
+            if (
+                cached_date is not None
+                and cached_date < today_date
+                and self._cached_tomorrow_periods
+                and self._cached_tomorrow_periods[0].get("period_dt")
+                and self._cached_tomorrow_periods[0]["period_dt"].date() == today_date
+            ):
+                _LOGGER.warning(
+                    "USEP: fetch failed and cached data is from %s — "
+                    "promoting cached tomorrow periods to today cache for continuity",
+                    cached_date,
+                )
+                self._cached_periods = self._cached_tomorrow_periods
+                self._cached_tomorrow_periods = []
+                self._tomorrow_fetch_date = None
+            else:
+                _LOGGER.warning("USEP: fetch failed — using cached data from previous cycle")
             periods = self._cached_periods
         else:
             raise UpdateFailed(
@@ -185,6 +232,23 @@ class USEPCoordinator(DataUpdateCoordinator):
                 self._tomorrow_fetch_date = today
 
         data.update(_process_tomorrow(self._cached_tomorrow_periods, now_sg))
+
+        # ── Change 1: next_usep at period 48 (23:30–00:00) ───────────────────
+        # The today-only period list has no period 49, so next_usep is None at
+        # 23:30.  If tomorrow periods are available, use the first one (00:00)
+        # as the next period so the sensor stays populated through midnight.
+        if data.get("next_usep") is None and self._cached_tomorrow_periods:
+            tomorrow_sorted = sorted(
+                self._cached_tomorrow_periods,
+                key=lambda p: p["period_dt"] or datetime.min.replace(tzinfo=now_sg.tzinfo),
+            )
+            if tomorrow_sorted:
+                data["next_usep"] = tomorrow_sorted[0]["usep"]
+                _LOGGER.debug(
+                    "USEP: next_usep supplemented from tomorrow cache — %s $/MWh",
+                    data["next_usep"],
+                )
+
         return data
 
     # ── CSV fetch ─────────────────────────────────────────────────────────────
