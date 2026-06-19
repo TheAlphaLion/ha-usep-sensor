@@ -13,11 +13,9 @@ Update schedule (two triggers per half-hour period):
     Randomisation prevents all HA instances hitting EMC simultaneously
     when this integration is used by many people.
     Sets data_status = "confirmed" once the settled price is retrieved.
-
-  Trigger 3 — tomorrow forecast  12:05:SS SGT (once per day)
-    Fetches the 72-period forecast (value=12): today's remaining 24
-    periods (noon–midnight) + all 48 periods of tomorrow (00:00–23:30).
-    Only the 48 tomorrow periods are retained and surfaced as sensors.
+    After noon SGT, also refreshes the 72-period tomorrow forecast on
+    every cycle — EMC updates it continuously, so the tomorrow sensors
+    stay current throughout the afternoon and evening.
 
 next_usep at period 48 (23:30–00:00):
   The today-only 48-period list has no period 49, so next_usep would
@@ -76,7 +74,6 @@ class USEPCoordinator(DataUpdateCoordinator):
         self._unsub: list = []
         self._cached_periods: list[dict] = []
         self._cached_tomorrow_periods: list[dict] = []
-        self._tomorrow_fetch_date: str | None = None   # date string for which we last fetched tomorrow
         # Random second within the :02/:32 minute — fixed per HA instance
         self._fetch_second: int = random.randint(10, 55)
         _LOGGER.info(
@@ -99,15 +96,6 @@ class USEPCoordinator(DataUpdateCoordinator):
             async_track_time_change(
                 self.hass, self._on_confirmed_fetch,
                 minute=[2, 32], second=self._fetch_second,
-            )
-        )
-        # Trigger 3: fetch tomorrow's 72-period forecast once after noon each day.
-        # Fires at 12:05:SS (same random second) to give EMC time to publish.
-        self._unsub.append(
-            async_track_time_change(
-                self.hass, self._on_noon_fetch,
-                hour=TOMORROW_FORECAST_AVAILABLE_HOUR, minute=5,
-                second=self._fetch_second,
             )
         )
         await self.async_refresh()
@@ -133,11 +121,6 @@ class USEPCoordinator(DataUpdateCoordinator):
         """Called at HH:02:SS and HH:32:SS — fetch fresh data from EMC."""
         self.hass.async_create_task(self.async_refresh())
 
-    @callback
-    def _on_noon_fetch(self, now: datetime) -> None:
-        """Called at 12:05:SS SGT — fetch the tomorrow 72-period forecast."""
-        self.hass.async_create_task(self._fetch_and_apply_tomorrow())
-
     async def _apply_cache(self, confirmed: bool) -> None:
         """Re-process cached periods without an HTTP fetch."""
         try:
@@ -155,23 +138,6 @@ class USEPCoordinator(DataUpdateCoordinator):
             self.async_set_updated_data(data)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("USEP: cache re-process failed: %s", exc)
-
-    async def _fetch_and_apply_tomorrow(self) -> None:
-        """Fetch tomorrow forecast in the background and push an update."""
-        now_sg = dt_util.now().astimezone(dt_util.get_time_zone(SG_TIMEZONE))
-        today = now_sg.strftime("%Y-%m-%d")
-        periods = await self._fetch_csv_tomorrow(today)
-        if periods:
-            self._cached_tomorrow_periods = periods
-            self._tomorrow_fetch_date = today
-            _LOGGER.debug(
-                "USEP: tomorrow forecast cached — %d periods for next day", len(periods)
-            )
-        # Merge into current coordinator data and push update
-        if self.data:
-            updated = dict(self.data)
-            updated.update(_process_tomorrow(self._cached_tomorrow_periods, now_sg))
-            self.async_set_updated_data(updated)
 
     # ── Main fetch ────────────────────────────────────────────────────────────
 
@@ -209,7 +175,6 @@ class USEPCoordinator(DataUpdateCoordinator):
                 )
                 self._cached_periods = self._cached_tomorrow_periods
                 self._cached_tomorrow_periods = []
-                self._tomorrow_fetch_date = None
             else:
                 _LOGGER.warning("USEP: fetch failed — using cached data from previous cycle")
             periods = self._cached_periods
@@ -221,15 +186,13 @@ class USEPCoordinator(DataUpdateCoordinator):
 
         data = _process(periods, now_sg, confirmed=True)
 
-        # Fetch tomorrow forecast if it's past noon and we haven't fetched for today yet
-        if (
-            now_sg.hour >= TOMORROW_FORECAST_AVAILABLE_HOUR
-            and self._tomorrow_fetch_date != today
-        ):
+        # Fetch tomorrow forecast on every cycle once past noon — EMC updates
+        # the 72-period forecast continuously, so we refresh it each half-hour
+        # alongside today's data rather than fetching it only once at 12:05.
+        if now_sg.hour >= TOMORROW_FORECAST_AVAILABLE_HOUR:
             tomorrow_periods = await self._fetch_csv_tomorrow(today)
             if tomorrow_periods:
                 self._cached_tomorrow_periods = tomorrow_periods
-                self._tomorrow_fetch_date = today
 
         data.update(_process_tomorrow(self._cached_tomorrow_periods, now_sg))
 

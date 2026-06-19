@@ -1,7 +1,7 @@
 {
   "domain": "usep",
   "name": "USEP — Singapore Electricity Price",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "documentation": "https://github.com/YOUR_GITHUB_USERNAME/ha-usep-sensor",
   "issue_tracker": "https://github.com/YOUR_GITHUB_USERNAME/ha-usep-sensor/issues",
   "codeowners": ["@YOUR_GITHUB_USERNAME"],
