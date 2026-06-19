@@ -284,7 +284,7 @@ This integration was developed with the assistance of [Claude AI](https://claude
 This integration fetches read-only public data from nems.emcsg.com over HTTPS with full TLS certificate validation. No credentials, API keys, or user input are involved.
 
 Notes for the security-conscious:
-- Dependencies — aiohttp and pytz are HA core dependencies and are intentionally omitted from requirements to avoid version conflicts. The integration uses whichever versions HA core provides.
+- Dependencies — aiohttp and pytz are HA core dependencies. Both are declared with loose lower-bound pins (>=) rather than exact versions to avoid conflicts with whichever versions HA core provides.
 - MIME validation — The JSON endpoint is fetched with content_type=None to tolerate EMC's inconsistent response headers. A future release may tighten this.
 - Price data integrity — USEP data is used as-is from EMC with no signature verification. If you use this integration to drive battery charge/discharge automations, be aware that a MITM substituting manipulated prices is theoretically possible, though TLS makes this unlikely in practice.
 - Fetch jitter — Each HA instance polls at a random second offset (:02:xx / :32:xx) to avoid thundering-herd on the EMC endpoint.
