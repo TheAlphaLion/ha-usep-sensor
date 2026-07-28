@@ -12,7 +12,10 @@ Update schedule (two triggers per half-hour period):
     SS is a random second between 10 and 55, chosen once at startup.
     Randomisation prevents all HA instances hitting EMC simultaneously
     when this integration is used by many people.
-    Sets data_status = "confirmed" once the settled price is retrieved.
+    Sets data_status = "confirmed" ONLY when the fetch to EMC actually
+    succeeds this cycle. If EMC is unreachable and the coordinator falls
+    back to cached data, data_status stays "forecast_pending" — it no
+    longer claims "confirmed" for stale or promoted data (fixed in 1.0.7).
     After noon SGT, also refreshes the 72-period tomorrow forecast on
     every cycle — EMC updates it continuously, so the tomorrow sensors
     stay current throughout the afternoon and evening.
@@ -22,11 +25,19 @@ next_usep at period 48 (23:30–00:00):
   normally be None at 23:30.  If cached tomorrow periods are available,
   the first tomorrow period (00:00–00:30) is used instead.
 
-Outage continuity across midnight:
-  If the today fetch fails AND the cached today-data is from the
-  previous day AND cached tomorrow-periods cover the new day, those
-  tomorrow periods are promoted to the today cache.  This keeps all
-  sensors populated through overnight EMC outages without any gap.
+Midnight rollover (fixed in 1.0.7):
+  As soon as the date rolls over — checked at every HH:00/HH:30
+  period-start tick, and again before each confirmed fetch — if the
+  cached today-data is still dated yesterday AND cached tomorrow-periods
+  cover the new day, those tomorrow periods are immediately promoted to
+  the today cache and the tomorrow cache is cleared. This means:
+    - "USEP Current" reflects the new day's forecasted midnight price
+      right at 00:00:00, not just after the next confirmed fetch at
+      00:02:SS, and works even through an overnight EMC outage.
+    - "USEP Forecast Data Tomorrow" no longer keeps showing yesterday's
+      (now same-day) data relabelled as "tomorrow" — it correctly goes
+      empty/unavailable until the genuine next-day forecast is fetched
+      after noon SGT.
 
 Data source:
   JSON  GET /api/sitecore/DataSync/Get?value=10&fromDate=...   (primary)
@@ -111,6 +122,11 @@ class USEPCoordinator(DataUpdateCoordinator):
     @callback
     def _on_period_start(self, now: datetime) -> None:
         """Called at HH:00 and HH:30 — advance period pointer using cache."""
+        now_sg = dt_util.now().astimezone(dt_util.get_time_zone(SG_TIMEZONE))
+        # Midnight rollover check happens here too (not just on the next
+        # confirmed fetch) so "USEP Current" is correct from 00:00:00
+        # onward, even if EMC is unreachable at 00:02:SS.
+        self._maybe_promote_tomorrow(now_sg)
         if self._cached_periods:
             self.hass.async_create_task(self._apply_cache(confirmed=False))
         else:
@@ -120,6 +136,39 @@ class USEPCoordinator(DataUpdateCoordinator):
     def _on_confirmed_fetch(self, now: datetime) -> None:
         """Called at HH:02:SS and HH:32:SS — fetch fresh data from EMC."""
         self.hass.async_create_task(self.async_refresh())
+
+    def _maybe_promote_tomorrow(self, now_sg: datetime) -> None:
+        """
+        Promote cached tomorrow-periods to today's cache once the date has
+        rolled over, and clear the tomorrow cache at the same time.
+
+        Runs on every period-start tick and at the top of every confirmed
+        fetch, so it fires as soon as possible after midnight regardless of
+        whether EMC is reachable. Being idempotent (it only acts once the
+        cached today-date is actually behind), it is safe to call often.
+        """
+        if not self._cached_periods or not self._cached_tomorrow_periods:
+            return
+        today_date = now_sg.date()
+        cached_date = (
+            self._cached_periods[0]["period_dt"].date()
+            if self._cached_periods[0].get("period_dt") else None
+        )
+        tomorrow_cache_date = (
+            self._cached_tomorrow_periods[0]["period_dt"].date()
+            if self._cached_tomorrow_periods[0].get("period_dt") else None
+        )
+        if (
+            cached_date is not None
+            and cached_date < today_date
+            and tomorrow_cache_date == today_date
+        ):
+            _LOGGER.info(
+                "USEP: midnight rollover — promoting cached tomorrow periods "
+                "to today cache and clearing tomorrow cache"
+            )
+            self._cached_periods = self._cached_tomorrow_periods
+            self._cached_tomorrow_periods = []
 
     async def _apply_cache(self, confirmed: bool) -> None:
         """Re-process cached periods without an HTTP fetch."""
@@ -142,41 +191,23 @@ class USEPCoordinator(DataUpdateCoordinator):
     # ── Main fetch ────────────────────────────────────────────────────────────
 
     async def _async_update_data(self) -> dict[str, Any]:
-        from datetime import date as date_t, timedelta as td
         now_sg = dt_util.now().astimezone(dt_util.get_time_zone(SG_TIMEZONE))
         today  = now_sg.strftime("%Y-%m-%d")
 
+        # Midnight rollover: promote cached tomorrow-periods to today's cache
+        # (and clear the tomorrow cache) BEFORE attempting the fetch below.
+        # This runs whether the fetch that follows succeeds or fails, so
+        # "Forecast Data Tomorrow" never keeps showing stale same-day data
+        # just because EMC happened to be reachable this cycle.
+        self._maybe_promote_tomorrow(now_sg)
+
         periods = await self._fetch_csv(today)
+        fetch_succeeded = bool(periods)
 
         if periods:
             self._cached_periods = periods
         elif self._cached_periods:
-            # ── Change 2: outage crossing midnight ───────────────────────────
-            # If the cached today-periods are from yesterday AND we have cached
-            # tomorrow-periods that cover today, promote them so the sensors
-            # keep working seamlessly through an overnight EMC outage.
-            cached_date = (
-                self._cached_periods[0]["period_dt"].date()
-                if self._cached_periods and self._cached_periods[0].get("period_dt")
-                else None
-            )
-            today_date = date_t.fromisoformat(today)
-            if (
-                cached_date is not None
-                and cached_date < today_date
-                and self._cached_tomorrow_periods
-                and self._cached_tomorrow_periods[0].get("period_dt")
-                and self._cached_tomorrow_periods[0]["period_dt"].date() == today_date
-            ):
-                _LOGGER.warning(
-                    "USEP: fetch failed and cached data is from %s — "
-                    "promoting cached tomorrow periods to today cache for continuity",
-                    cached_date,
-                )
-                self._cached_periods = self._cached_tomorrow_periods
-                self._cached_tomorrow_periods = []
-            else:
-                _LOGGER.warning("USEP: fetch failed — using cached data from previous cycle")
+            _LOGGER.warning("USEP: fetch failed — using cached data from previous cycle")
             periods = self._cached_periods
         else:
             raise UpdateFailed(
@@ -184,7 +215,11 @@ class USEPCoordinator(DataUpdateCoordinator):
                 "Check HA logs and verify nems.emcsg.com is reachable."
             )
 
-        data = _process(periods, now_sg, confirmed=True)
+        # data_status only reports "confirmed" when this cycle's fetch
+        # actually succeeded. A fallback to cached/promoted data — e.g.
+        # NEMS stuck at the :02/:32 mark — now correctly stays
+        # "forecast_pending" instead of falsely claiming "confirmed".
+        data = _process(periods, now_sg, confirmed=fetch_succeeded)
 
         # Fetch tomorrow forecast on every cycle once past noon — EMC updates
         # the 72-period forecast continuously, so we refresh it each half-hour
