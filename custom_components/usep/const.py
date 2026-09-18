@@ -22,12 +22,24 @@ ENDPOINT_CSV_TOMORROW  = f"{BASE_URL}/DataDownload?value=12&fromDate={{date}}&to
 TOMORROW_FORECAST_AVAILABLE_HOUR = 12
 
 # CSV column indices (0-based, after skipping header row)
-CSV_COL_DATE   = 0
-CSV_COL_PERIOD = 1
-CSV_COL_DEMAND = 2
-CSV_COL_SOLAR  = 3
-CSV_COL_USEP   = 5
-CSV_COL_RUSEP  = 8   # blank / "-" for forecast periods; populated for settled periods
+CSV_COL_DATE        = 0
+CSV_COL_PERIOD      = 1
+CSV_COL_DEMAND      = 2
+CSV_COL_SOLAR       = 3
+CSV_COL_USEP        = 5
+CSV_COL_RUSEP       = 8    # blank / "-" for forecast periods; populated for settled periods
+CSV_COL_MAP         = 9    # Moving Average Price — blank for forecast periods
+CSV_COL_MAPT        = 10   # MAP Threshold — blank for forecast periods, ~constant otherwise
+CSV_COL_TPC_APPLIED = 11   # "Yes"/"No" — blank for forecast periods
+
+# ── Temporary Price Cap (TPC) forecasting ──────────────────────────────────────
+# EMC's TPC mechanism caps published USEP to MAPT whenever MAP (the trailing
+# 24-hour / 48-period moving average of the *uncapped* reference price) is
+# above MAPT. MAP/MAPT/TPC Applied are only populated for settled periods, so
+# forecast periods are annotated with an *implied* MAP computed from a rolling
+# price window (see coordinator.py `_apply_tpc` / `_implied_map`).
+TPC_MOVING_AVERAGE_PERIODS   = 48   # 24 hours of half-hour periods
+TPC_PRICE_WINDOW_MAX_AGE_HOURS = 26  # retention margin for the rolling buffer
 
 # Units
 UNIT_MWH = "$/MWh"

@@ -1,7 +1,7 @@
 """
 USEP sensor platform.
 
-Creates 10 sensor entities from the coordinator data.
+Creates 11 sensor entities from the coordinator data.
 All sensors belong to a single device: "USEP — Singapore Electricity Price".
 """
 
@@ -45,7 +45,8 @@ SENSORS: tuple[USEPSensorDescription, ...] = (
         native_unit_of_measurement=UNIT_MWH,
         state_class=SensorStateClass.MEASUREMENT,
         extra_keys=["current_period", "current_demand", "current_solar",
-                    "current_is_forecast", "data_status"],
+                    "current_is_forecast", "data_status",
+                    "current_usep_raw", "current_tpc_status"],
     ),
     USEPSensorDescription(
         key="next_usep",
@@ -88,6 +89,18 @@ SENSORS: tuple[USEPSensorDescription, ...] = (
         native_unit_of_measurement=UNIT_MWH,
         state_class=SensorStateClass.MEASUREMENT,
         extra_keys=["lowest_forecast_period", "lowest_forecast_dt"],
+    ),
+    # ── TPC (Temporary Price Cap) sensor ─────────────────────────────────────
+    # State: "Capped" / "Not Capped" / "Unknown". For the current period this
+    # is EMC's own confirmed flag once settled; while still forecast_pending
+    # it's our own implied-MAP estimate (see coordinator.py module docstring).
+    USEPSensorDescription(
+        key="tpc_status",
+        data_key="current_tpc_status",
+        name="USEP TPC Status",
+        icon="mdi:shield-alert-outline",
+        extra_keys=["current_usep_raw", "current_implied_map",
+                    "current_mapt", "current_tpc_method", "current_is_forecast"],
     ),
     # ── Grid sensors ──────────────────────────────────────────────────────────
     USEPSensorDescription(
